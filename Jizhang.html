@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SYSTEM_LEDGER v9.5 // EXPORT_FIX</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        /* DESIGN SPECIFICATION v9.5 */
+        :root {
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --c-income: #059669; --c-expense: #DC2626; --c-credit: #D97706; --c-cost: #EA580C;
+            --bg-body: #F3F4F6;
+        }
+        body { font-family: var(--font-sans); background-color: var(--bg-body); color: #111827; -webkit-font-smoothing: antialiased; }
+        .num-font { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.05em; }
+        .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* SIDEBAR */
+        #sidebar { transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+        .nav-item { display: flex; align-items: center; padding: 1rem; border-bottom: 1px solid #1F2937; color: #D1D5DB; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.1s; }
+        .nav-item:active, .nav-item.active { background-color: #374151; color: #FFFFFF; border-left: 4px solid #FFFFFF; }
+        .nav-icon { width: 24px; text-align: center; margin-right: 12px; }
+
+        /* GRID */
+        .dash-grid-pro { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px; background-color: #E5E7EB; border-bottom: 1px solid #E5E7EB; }
+        .dash-cell { background-color: #FFFFFF; padding: 0.5rem 0.25rem; text-align: center; display: flex; flex-direction: column; justify-content: center; height: 60px; }
+        .dash-cell.secondary { background-color: #F9FAFB; }
+        .dash-row-header { grid-column: 1 / -1; background-color: #F3F4F6; color: #4B5563; font-size: 0.65rem; font-weight: 700; padding: 0.25rem 0.5rem; border-bottom: 1px solid #E5E7EB; letter-spacing: 0.05em; }
+        .label-xs { font-size: 0.6rem; color: #6B7280; font-weight: 600; margin-bottom: 2px; text-transform: uppercase; }
+        .val-md { font-size: 0.9rem; font-weight: 700; }
+
+        /* INPUTS */
+        .sys-input { border: 1px solid #D1D5DB; border-radius: 0; padding: 0.5rem; font-size: 0.85rem; background: white; color: #111827; width: 100%; height: 32px; }
+        .sys-input:focus { border-color: #111827; outline: none; }
+
+        /* BUTTONS */
+        .type-btn { background: #F3F4F6; color: #6B7280; border: 1px solid transparent; font-size: 0.75rem; font-weight: 600; padding: 0.5rem 0; }
+        .type-btn.active { background: #FFFFFF; border-color: #D1D5DB; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .type-btn.active[data-type="cost"] { color: var(--c-cost); border-bottom: 3px solid var(--c-cost); }
+        .type-btn.active[data-type="expense"] { color: var(--c-expense); border-bottom: 3px solid var(--c-expense); }
+        .type-btn.active[data-type="income"] { color: var(--c-income); border-bottom: 3px solid var(--c-income); }
+        .type-btn.active[data-type="credit"] { color: var(--c-credit); border-bottom: 3px solid var(--c-credit); }
+
+        /* LIST */
+        .row-item { display: grid; grid-template-columns: 2.5rem 1fr 4.5rem 2rem; gap: 0.5rem; padding: 0.6rem 0.5rem; border-bottom: 1px solid #F3F4F6; align-items: center; font-size: 0.85rem; }
+        .row-header { background: #F9FAFB; font-size: 0.7rem; color: #6B7280; font-weight: 700; padding: 0.5rem; border-bottom: 1px solid #E5E7EB; }
+        .tag-type { font-size: 0.6rem; padding: 1px 4px; border-radius: 2px; font-weight: 700; margin-right: 4px; }
+        .tag-cost { background: #FFEDD5; color: #C2410C; } .tag-exp { background: #FEE2E2; color: #B91C1C; } .tag-inc { background: #D1FAE5; color: #047857; } .tag-credit { background: #FEF3C7; color: #B45309; }
+        
+        .btn-delete { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; color: #D1D5DB; border-radius: 4px; cursor: pointer; }
+        .btn-delete:active { background-color: #FEE2E2; color: #DC2626; }
+
+        /* CONFIG DELETE BUTTON */
+        .btn-config-del { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: #EF4444; border: 1px solid #FECACA; background-color: #FEF2F2; cursor: pointer; border-radius: 4px; transition: all 0.1s; }
+        .btn-config-del:active { background-color: #F87171; color: white; }
+
+        /* CREDIT SPECIFIC */
+        .credit-check { appearance: none; width: 1.25rem; height: 1.25rem; border: 2px solid #D1D5DB; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+        .credit-check:checked { background-color: #059669; border-color: #059669; }
+        .credit-check:checked::after { content: '\2713'; color: white; font-size: 0.8rem; font-weight: bold; }
+        .row-credit { display: grid; grid-template-columns: 2rem 2.5rem 1fr 4rem; gap: 0.5rem; padding: 0.75rem 0.5rem; border-bottom: 1px solid #F3F4F6; align-items: center; font-size: 0.85rem; }
+        .row-credit.paid .text-info { text-decoration: line-through; color: #9CA3AF; }
+        .row-credit.paid .text-amt { color: #059669; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden bg-white">
+
+    <!-- HEADER -->
+    <header class="flex-none bg-white z-20 shadow-sm border-b border-gray-200">
+        <div class="px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center gap-4">
+                <button onclick="toggleSidebar()" class="text-gray-600 hover:text-black"><i class="fas fa-bars text-lg"></i></button>
+                <h1 id="page-title" class="font-bold tracking-tight text-gray-900 text-sm">系統控制台 (CONSOLE)</h1>
+            </div>
+        </div>
+    </header>
+
+    <!-- SIDEBAR -->
+    <div id="sidebar-overlay" onclick="toggleSidebar()" class="fixed inset-0 bg-black/50 z-40 hidden transition-opacity"></div>
+    <nav id="sidebar" class="fixed top-0 left-0 bottom-0 w-64 bg-gray-900 z-50 transform -translate-x-full shadow-2xl flex flex-col">
+        <div class="p-5 border-b border-gray-800 text-white font-bold text-lg tracking-wider">SYSTEM_LEDGER</div>
+        <div class="flex-1 overflow-y-auto">
+            <div onclick="route('home')" class="nav-item active" id="nav-home"><div class="nav-icon"><i class="fas fa-calculator"></i></div>控制台 (CONSOLE)</div>
+            <div onclick="route('credit')" class="nav-item" id="nav-credit"><div class="nav-icon"><i class="fas fa-file-invoice-dollar"></i></div>賒帳管理 (CREDIT)</div>
+            <div onclick="route('query')" class="nav-item" id="nav-query"><div class="nav-icon"><i class="fas fa-chart-pie"></i></div>商業分析 (BI)</div>
+            <div onclick="route('config')" class="nav-item" id="nav-config"><div class="nav-icon"><i class="fas fa-sliders-h"></i></div>系統配置 (CONFIG)</div>
+        </div>
+        <div class="p-4 border-t border-gray-800 text-gray-500 text-xs font-mono text-center">v9.5 STABLE</div>
+    </nav>
+
+    <!-- MAIN -->
+    <main class="flex-1 relative overflow-hidden flex flex-col">
+        
+        <!-- === VIEW: CONSOLE === -->
+        <div id="view-home" class="flex flex-col h-full">
+            <div class="flex-none overflow-y-auto max-h-[40vh]">
+                <div class="border-b border-gray-300">
+                    <div class="dash-row-header">今日營運 (TODAY)</div>
+                    <div class="dash-grid-pro">
+                        <div class="dash-cell"><span class="label-xs text-emerald-700">營業額</span><span id="day-rev" class="num-font val-md text-emerald-700">0</span></div>
+                        <div class="dash-cell bg-amber-50"><span class="label-xs text-amber-700">其中:賒帳</span><span id="day-credit" class="num-font val-md text-amber-700">0</span></div>
+                        <div class="dash-cell"><span class="label-xs text-blue-600">毛利率</span><span id="day-margin" class="num-font val-md text-blue-600">0%</span></div>
+                    </div>
+                    <div class="dash-grid-pro">
+                        <div class="dash-cell"><span class="label-xs text-orange-600">成本</span><span id="day-cost" class="num-font val-md text-orange-600">0</span></div>
+                        <div class="dash-cell"><span class="label-xs text-rose-600">費用</span><span id="day-exp" class="num-font val-md text-rose-600">0</span></div>
+                        <div class="dash-cell bg-gray-50"><span class="label-xs text-gray-900">淨利</span><span id="day-net" class="num-font val-md text-gray-900">0</span></div>
+                    </div>
+                </div>
+                <div class="border-b border-gray-300 mt-2">
+                    <div class="dash-row-header">全域累計 (TOTAL HISTORY)</div>
+                    <div class="dash-grid-pro">
+                        <div class="dash-cell secondary"><span class="label-xs text-gray-500">總營業額</span><span id="all-rev" class="num-font val-md text-gray-600">0</span></div>
+                        <div class="dash-cell bg-red-50"><span class="label-xs text-red-600 font-bold">待收帳款 (RISK)</span><span id="all-outstanding" class="num-font val-md text-red-600">0</span></div>
+                        <div class="dash-cell secondary"><span class="label-xs text-gray-500">平均毛利</span><span id="all-margin" class="num-font val-md text-blue-600/70">0%</span></div>
+                    </div>
+                    <div class="dash-grid-pro">
+                        <div class="dash-cell secondary"><span class="label-xs text-gray-500">總成本</span><span id="all-cost" class="num-font val-md text-gray-600">0</span></div>
+                        <div class="dash-cell secondary"><span class="label-xs text-gray-500">總費用</span><span id="all-exp" class="num-font val-md text-gray-600">0</span></div>
+                        <div class="dash-cell secondary"><span class="label-xs text-gray-900">總淨資產</span><span id="all-net" class="num-font val-md text-gray-800">0</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto no-scrollbar bg-white">
+                <div class="row-item row-header sticky top-0 z-10"><div class="pl-1">日期</div><div>項目 / 分類</div><div class="text-right">金額</div><div class="text-center"></div></div>
+                <div id="home-ledger-list" class="pb-4"></div>
+            </div>
+            <section class="flex-none bg-white border-t border-gray-200 p-3 pb-safe z-30 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+                <div class="flex rounded-sm overflow-hidden border border-gray-200 mb-2">
+                    <button onclick="setType('cost')" class="type-btn active flex-1" data-type="cost">成本</button>
+                    <button onclick="setType('expense')" class="type-btn flex-1" data-type="expense">費用</button>
+                    <button onclick="setType('income')" class="type-btn flex-1" data-type="income">營收</button>
+                    <button onclick="setType('credit')" class="type-btn flex-1" data-type="credit">賒帳</button>
+                </div>
+                <form onsubmit="commitData(event)" class="grid grid-cols-4 gap-2">
+                    <div class="col-span-2"><input type="number" id="in-amt" class="sys-input font-mono font-bold text-lg" placeholder="0.00" step="0.01" required></div>
+                    <div class="col-span-2"><select id="in-cat" class="sys-input text-xs font-medium" onchange="updateSubSuggest()"></select></div>
+                    <div class="col-span-2 relative"><input type="text" id="in-sub" list="sub-list" class="sys-input text-xs" placeholder="項目說明..."><datalist id="sub-list"></datalist></div>
+                    <div class="col-span-2"><input type="date" id="in-date" class="sys-input text-center font-mono text-xs px-0"></div>
+                    <button type="submit" class="col-span-4 bg-gray-900 hover:bg-black text-white py-2 text-xs font-bold tracking-widest uppercase">寫入數據</button>
+                </form>
+            </section>
+        </div>
+
+        <!-- === VIEW: CREDIT === -->
+        <div id="view-credit" class="hidden flex-col h-full bg-white">
+            <div class="p-3 border-b border-gray-200 bg-white shadow-sm flex-none">
+                <div class="grid grid-cols-2 gap-3 mb-2">
+                    <div><div class="label-xs mb-1">時間維度</div><select id="crm-time-mode" class="sys-input font-mono" onchange="toggleCreditDateInputs()"><option value="day">單獨一日 (SINGLE)</option><option value="range">自定義範圍 (RANGE)</option><option value="all">全域 (ALL)</option></select></div>
+                    <div><div class="label-xs mb-1">店鋪</div><select id="crm-cat-filter" class="sys-input" onchange="renderCreditManager()"><option value="all">-- 所有店鋪 --</option></select></div>
+                </div>
+                <div id="crm-date-inputs" class="grid grid-cols-2 gap-3"><input type="date" id="crm-date-start" class="sys-input font-mono text-center" onchange="renderCreditManager()"><input type="date" id="crm-date-end" class="sys-input font-mono text-center hidden" onchange="renderCreditManager()"></div>
+            </div>
+            <div class="border-b border-gray-300">
+                <div class="dash-row-header bg-amber-50 text-amber-900 border-amber-100 flex justify-between"><span><i class="fas fa-history mr-1"></i> 區間帳務 (PERIOD)</span><span id="crm-period-label" class="font-mono text-[0.6rem] opacity-70"></span></div>
+                <div class="dash-grid-pro bg-amber-50/30">
+                    <div class="dash-cell bg-transparent"><span class="label-xs text-amber-700">期間新增賒帳</span><span id="crm-period-issued" class="num-font val-md text-amber-800">0</span></div>
+                    <div class="dash-cell bg-transparent"><span class="label-xs text-emerald-600">期間已追回</span><span id="crm-period-collected" class="num-font val-md text-emerald-700">0</span></div>
+                    <div class="dash-cell bg-transparent"><span class="label-xs text-red-600">期間未追回</span><span id="crm-period-outstanding" class="num-font val-md text-red-700">0</span></div>
+                </div>
+            </div>
+            <div class="border-b border-gray-300">
+                <div class="dash-row-header">全域資產狀態 (GLOBAL STOCK)</div>
+                <div class="dash-grid-pro">
+                    <div class="dash-cell secondary"><span class="label-xs text-gray-500">歷史總賒帳</span><span id="crm-total-issued" class="num-font val-md text-gray-600">0</span></div>
+                    <div class="dash-cell secondary"><span class="label-xs text-emerald-600/70">歷史總回收</span><span id="crm-total-collected" class="num-font val-md text-emerald-700/70">0</span></div>
+                    <div class="dash-cell bg-red-50"><span class="label-xs text-red-600 font-bold">目前總未收</span><span id="crm-total-outstanding" class="num-font val-md text-red-600">0</span></div>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto no-scrollbar"><div class="row-credit bg-gray-100 font-bold text-xs text-gray-500 border-b border-gray-200 sticky top-0"><div class="text-center">還款</div><div>日期</div><div>對象 / 項目</div><div class="text-right">金額</div></div><div id="credit-list" class="pb-10"></div></div>
+        </div>
+
+        <!-- === VIEW: QUERY === -->
+        <div id="view-query" class="hidden flex-col h-full bg-gray-50">
+            <div class="bg-white border-b border-gray-200 p-3 shadow-sm flex-none space-y-2">
+                <div class="grid grid-cols-2 gap-3">
+                    <div><div class="label-xs mb-1">時間維度</div><select id="qry-time-mode" class="sys-input font-mono" onchange="toggleQueryDateInputs()"><option value="month">本月</option><option value="day">單獨一日</option><option value="range">自定義範圍</option><option value="year">今年</option><option value="all">全域</option></select></div>
+                    <div><div class="label-xs mb-1">指定店鋪</div><select id="qry-cat" class="sys-input font-bold text-blue-800 bg-blue-50 border-blue-200" onchange="runQuery()"><option value="all">-- 所有店鋪 --</option></select></div>
+                </div>
+                <div id="qry-date-inputs" class="grid grid-cols-2 gap-3 hidden"><input type="date" id="qry-date-start" class="sys-input font-mono text-center" onchange="runQuery()"><input type="date" id="qry-date-end" class="sys-input font-mono text-center hidden" onchange="runQuery()"></div>
+                <div><input type="text" id="qry-keyword" class="sys-input" placeholder="關鍵字搜尋..." oninput="runQuery()"></div>
+            </div>
+            <div class="bg-white border-b border-gray-200 p-3 flex-none">
+                <div class="label-xs mb-2 text-gray-800 font-bold border-b border-gray-100 pb-1">分析結果 <span id="qry-period-label" class="font-mono font-normal opacity-50 ml-2"></span></div>
+                <div class="grid grid-cols-3 divide-x divide-gray-100 bg-gray-50 border border-gray-100 rounded-t-sm"><div class="p-2 text-center"><div class="label-xs text-emerald-600">總營業額</div><div id="res-rev" class="num-font font-bold text-sm text-gray-900">0</div></div><div class="p-2 text-center"><div class="label-xs text-orange-600">總成本</div><div id="res-cost" class="num-font font-bold text-sm text-gray-900">0</div></div><div class="p-2 text-center"><div class="label-xs text-rose-600">總費用</div><div id="res-exp" class="num-font font-bold text-sm text-gray-900">0</div></div></div>
+                <div class="grid grid-cols-2 divide-x divide-gray-100 bg-blue-50 border-x border-b border-blue-100 rounded-b-sm"><div class="p-2 text-center"><div class="label-xs text-blue-700">毛利金額</div><div id="res-gp" class="num-font font-bold text-base text-blue-800">0</div></div><div class="p-2 text-center"><div class="label-xs text-blue-700">毛利率</div><div id="res-margin" class="num-font font-bold text-base text-blue-800">0%</div></div></div>
+            </div>
+            <div class="flex-1 overflow-y-auto no-scrollbar bg-white"><div class="row-item row-header bg-gray-100 sticky top-0 border-b border-gray-200"><div class="pl-1">日期</div><div>檢索結果 (<span id="res-count">0</span>)</div><div class="text-right">金額</div><div></div></div><div id="query-list" class="pb-10"></div></div>
+        </div>
+
+        <!-- === VIEW: CONFIG === -->
+        <div id="view-config" class="hidden flex-col h-full bg-white p-4 overflow-y-auto">
+            <div class="space-y-6">
+                <div>
+                    <div class="label-xs mb-2 text-lg border-b border-gray-200 pb-1">分類管理</div>
+                    <div class="flex gap-2 mb-3"><input id="new-cat" type="text" class="sys-input text-xs" placeholder="新增分類"><button onclick="sysAddCat()" class="bg-gray-900 text-white px-4 text-xs font-bold hover:bg-black">ADD</button></div>
+                    <div id="cat-list" class="border border-gray-200 rounded p-1 space-y-1"></div>
+                </div>
+                <div>
+                    <div class="label-xs mb-2 text-lg border-b border-gray-200 pb-1">數據 I/O</div>
+                    <div class="grid grid-cols-2 gap-3 mb-3"><button onclick="sysExport()" class="border border-gray-300 py-2 text-xs font-bold hover:bg-gray-50">導出 JSON</button><button onclick="document.getElementById('file-in').click()" class="border border-gray-300 py-2 text-xs font-bold hover:bg-gray-50">導入 JSON</button><input type="file" id="file-in" class="hidden" onchange="sysImport(this)"></div><button onclick="sysPurge()" class="w-full border border-red-200 text-red-600 py-2 text-xs font-bold hover:bg-red-50">重置系統</button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+  
