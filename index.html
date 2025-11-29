@@ -207,7 +207,370 @@
             </div>
         </div>
     </main>
-    <script src="app.js"></script>
+
+    <!-- EXPORT MODAL (NEW) -->
+    <div id="modal-export" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center">
+        <div class="bg-white w-11/12 max-w-sm shadow-2xl rounded-sm overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="bg-gray-900 text-white px-4 py-2 flex justify-between items-center"><span class="text-xs font-bold font-mono">DATA_EXPORT</span><button onclick="closeExport()" class="hover:text-gray-300"><i class="fas fa-times"></i></button></div>
+            <div class="p-4 flex-1 flex flex-col overflow-hidden">
+                <p class="text-xs text-gray-500 mb-2">若檔案未自動下載，請複製下方代碼手動備份：</p>
+                <textarea id="export-area" class="flex-1 w-full border border-gray-200 p-2 text-[10px] font-mono bg-gray-50 resize-none mb-3" readonly></textarea>
+                <div class="grid grid-cols-2 gap-2"><button onclick="copyExport()" class="bg-emerald-600 text-white py-2 text-xs font-bold hover:bg-emerald-700">複製代碼</button><button onclick="downloadFile()" class="bg-blue-600 text-white py-2 text-xs font-bold hover:bg-blue-700">下載檔案</button></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ALERT -->
+    <div id="modal-alert" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center">
+        <div class="bg-white w-72 shadow-2xl rounded-sm overflow-hidden">
+            <div class="bg-red-600 text-white px-4 py-2 flex items-center gap-2"><i class="fas fa-exclamation-triangle text-xs"></i><span id="alert-title" class="text-xs font-bold">系統警示</span></div>
+            <div class="p-5">
+                <div id="alert-msg" class="text-sm font-bold text-gray-900 mb-2">確認執行？</div>
+                <div id="alert-detail" class="text-xs text-gray-500 mb-4 font-mono bg-gray-50 p-2 border border-gray-100 rounded hidden"></div>
+                <div class="flex gap-2"><button onclick="closeAlert()" class="flex-1 border border-gray-300 py-2 text-xs font-bold text-gray-600 hover:bg-gray-50">取消</button><button onclick="confirmAction()" class="flex-1 bg-red-600 text-white py-2 text-xs font-bold hover:bg-red-700">確認</button></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DB_KEY = 'sys_ledger_v9_5_core';
+        const META_KEY = 'sys_ledger_v9_5_meta';
+        const DEFAULT_CATS = ['台北總店', '台中分店', '高雄分店', '網路商城', '雜項支出'];
+        
+        let STATE = { txs: [], cats: [], subs: [], currType: 'cost' };
+        
+        // Alert State
+        let actionType = null; let targetId = null; let targetCat = null;
+
+        window.onload = () => { 
+            initSystem(); 
+            const today = new Date().toLocaleDateString('en-CA');
+            document.getElementById('in-date').value = today; 
+            document.getElementById('crm-date-start').value = today;
+            document.getElementById('crm-date-end').value = today;
+            document.getElementById('qry-date-start').value = today;
+            document.getElementById('qry-date-end').value = today;
+            renderHome(); 
+        };
+
+        function toggleSidebar() {
+            const sb = document.getElementById('sidebar'), ov = document.getElementById('sidebar-overlay');
+            const isOpen = !sb.classList.contains('-translate-x-full');
+            if(isOpen){ sb.classList.add('-translate-x-full'); ov.classList.add('hidden'); }
+            else{ sb.classList.remove('-translate-x-full'); ov.classList.remove('hidden'); }
+        }
+
+        function route(v) {
+            document.querySelectorAll('.nav-item').forEach(e=>e.classList.remove('active'));
+            document.getElementById(`nav-${v}`).classList.add('active');
+            ['home','credit','query','config'].forEach(id => document.getElementById(`view-${id}`).classList.add('hidden'));
+            document.getElementById(`view-${v}`).classList.remove('hidden');
+            document.getElementById('page-title').innerText = {'home':'系統控制台 (CONSOLE)','credit':'賒帳管理 (CREDIT)','query':'商業分析 (BI)','config':'系統配置 (CONFIG)'}[v];
+            toggleSidebar();
+            if(v==='home') renderHome();
+            if(v==='credit') { renderQueryCats('crm-cat-filter'); toggleCreditDateInputs(); renderCreditManager(); }
+            if(v==='query') { renderQueryCats('qry-cat'); toggleQueryDateInputs(); runQuery(); }
+            if(v==='config') renderCatManager();
+        }
+
+        function initSystem() {
+            try {
+                const db = localStorage.getItem(DB_KEY), meta = localStorage.getItem(META_KEY);
+                if(db) STATE.txs = JSON.parse(db);
+                if(meta) { const m = JSON.parse(meta); STATE.cats = m.cats || DEFAULT_CATS; STATE.subs = m.subs || []; }
+                else STATE.cats = DEFAULT_CATS;
+            } catch(e) { STATE.cats = DEFAULT_CATS; }
+        }
+        function persist() {
+            localStorage.setItem(DB_KEY, JSON.stringify(STATE.txs));
+            localStorage.setItem(META_KEY, JSON.stringify({ cats: STATE.cats, subs: STATE.subs }));
+            if(!document.getElementById('view-home').classList.contains('hidden')) renderMetrics();
+        }
+
+        function setType(t) { STATE.currType = t; document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === t)); }
+
+        function commitData(e) {
+            e.preventDefault();
+            const amt = parseFloat(document.getElementById('in-amt').value);
+            const date = document.getElementById('in-date').value;
+            const cat = document.getElementById('in-cat').value;
+            const sub = document.getElementById('in-sub').value.trim() || '一般項目';
+            if(!amt || !date) return;
+
+            let entry = STATE.subs.find(s => s.cat === cat);
+            if(!entry) { entry = { cat, items: [] }; STATE.subs.push(entry); }
+            if(!entry.items.includes(sub)) entry.items.push(sub);
+
+            STATE.txs.unshift({ id: Date.now().toString(36), ts: Date.now(), date, type: STATE.currType, cat, sub, amt, isPaid: false });
+            persist();
+            document.getElementById('in-amt').value = ''; document.getElementById('in-sub').value = ''; document.getElementById('in-amt').focus();
+            renderLedgerList();
+        }
+
+        // --- EXPORT FIX ---
+        function sysExport() {
+            const json = JSON.stringify(STATE, null, 2);
+            document.getElementById('export-area').value = json;
+            document.getElementById('modal-export').classList.remove('hidden');
+            downloadFile();
+        }
+        function downloadFile() {
+            const json = document.getElementById('export-area').value;
+            const blob = new Blob([json], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `SYSTEM_LEDGER_${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+        function copyExport() {
+            document.getElementById('export-area').select();
+            document.execCommand('copy');
+            alert('已複製代碼');
+        }
+        function closeExport() { document.getElementById('modal-export').classList.add('hidden'); }
+
+        // --- ALERT SYSTEM ---
+        function openAlert(title, msg, detail = null) {
+            document.getElementById('alert-title').innerText = title;
+            document.getElementById('alert-msg').innerText = msg;
+            const d = document.getElementById('alert-detail');
+            if (detail) { d.innerHTML = detail; d.classList.remove('hidden'); } else { d.classList.add('hidden'); }
+            document.getElementById('modal-alert').classList.remove('hidden');
+        }
+        function closeAlert() {
+            document.getElementById('modal-alert').classList.add('hidden');
+            actionType = null; targetId = null; targetCat = null;
+        }
+        function promptDeleteTx(id) {
+            const t = STATE.txs.find(x => x.id === id); if (!t) return;
+            actionType = 'deleteTx'; targetId = id;
+            openAlert('刪除紀錄', '確認移除此筆資料？', `ID: ${id}<br>ITEM: ${t.sub} ($${t.amt})`);
+        }
+        function promptDelCat(cat) {
+            actionType = 'deleteCat'; targetCat = cat;
+            openAlert('刪除分類', `確認移除分類「${cat}」？`, '歷史帳務不會刪除，但選單將不再顯示。');
+        }
+        function sysPurge() {
+            actionType = 'purge';
+            openAlert('重置系統', '警告：將永久刪除所有資料！', '此操作無法復原。');
+        }
+        function confirmAction() {
+            if (actionType === 'deleteTx' && targetId) {
+                STATE.txs = STATE.txs.filter(t => t.id !== targetId);
+                persist();
+                if(!document.getElementById('view-home').classList.contains('hidden')) renderLedgerList();
+                if(!document.getElementById('view-query').classList.contains('hidden')) runQuery();
+                if(!document.getElementById('view-credit').classList.contains('hidden')) renderCreditManager();
+            } else if (actionType === 'deleteCat' && targetCat) {
+                STATE.cats = STATE.cats.filter(c => c !== targetCat);
+                persist();
+                renderCatManager();
+                if(!document.getElementById('view-home').classList.contains('hidden')) renderCats(); 
+            } else if (actionType === 'purge') {
+                localStorage.clear(); location.reload();
+            }
+            closeAlert();
+        }
+
+        // --- ACCOUNTING METRICS ---
+        function renderMetrics() {
+            let dCash=0, dCredit=0, dCost=0, dExp=0;
+            let aCash=0, aCredit=0, aCost=0, aExp=0, aOut=0;
+            const todayStr = document.getElementById('in-date').value || new Date().toLocaleDateString('en-CA');
+
+            STATE.txs.forEach(t => {
+                let type = (t.type==='debt'||t.type==='receivable')?'credit':t.type;
+                if(type === 'income') aCash += t.amt;
+                else if(type === 'credit') { aCredit += t.amt; if(!t.isPaid) aOut += t.amt; }
+                else if(type === 'cost') aCost += t.amt;
+                else if(type === 'expense') aExp += t.amt;
+
+                if(t.date === todayStr) {
+                    if(type === 'income') dCash += t.amt;
+                    else if(type === 'credit') dCredit += t.amt;
+                    else if(type === 'cost') dCost += t.amt;
+                    else if(type === 'expense') dExp += t.amt;
+                }
+            });
+
+            const dRev = dCash + dCredit; const aRev = aCash + aCredit;
+            const dGP = dRev - dCost; const aGP = aRev - aCost;
+            const dMargin = dRev > 0 ? (dGP / dRev) * 100 : 0; const aMargin = aRev > 0 ? (aGP / aRev) * 100 : 0;
+            const dNet = dGP - dExp; const aNet = aGP - aExp;
+
+            const fmt = new Intl.NumberFormat('en-US');
+            document.getElementById('day-rev').innerText = fmt.format(dRev);
+            document.getElementById('day-credit').innerText = fmt.format(dCredit);
+            document.getElementById('day-margin').innerText = dMargin.toFixed(1) + '%';
+            document.getElementById('day-cost').innerText = fmt.format(dCost);
+            document.getElementById('day-exp').innerText = fmt.format(dExp);
+            document.getElementById('day-net').innerText = fmt.format(dNet);
+
+            document.getElementById('all-rev').innerText = fmt.format(aRev);
+            document.getElementById('all-outstanding').innerText = fmt.format(aOut);
+            document.getElementById('all-margin').innerText = aMargin.toFixed(1) + '%';
+            document.getElementById('all-cost').innerText = fmt.format(aCost);
+            document.getElementById('all-exp').innerText = fmt.format(aExp);
+            document.getElementById('all-net').innerText = fmt.format(aNet);
+        }
+
+        // --- CREDIT MANAGER LOGIC ---
+        function toggleCreditDateInputs() {
+            const mode = document.getElementById('crm-time-mode').value;
+            const start = document.getElementById('crm-date-start');
+            const end = document.getElementById('crm-date-end');
+            if (mode === 'day') { start.classList.remove('hidden'); end.classList.add('hidden'); } 
+            else if (mode === 'range') { start.classList.remove('hidden'); end.classList.remove('hidden'); } 
+            else { start.classList.add('hidden'); end.classList.add('hidden'); }
+            renderCreditManager();
+        }
+
+        function renderCreditManager() {
+            const list = document.getElementById('credit-list'); list.innerHTML = '';
+            const mode = document.getElementById('crm-time-mode').value;
+            const catFilter = document.getElementById('crm-cat-filter').value;
+            const startDate = document.getElementById('crm-date-start').value;
+            const endDate = document.getElementById('crm-date-end').value;
+
+            let periodLabel = "ALL TIME";
+            if(mode === 'day') periodLabel = startDate; else if(mode === 'range') periodLabel = `${startDate} ~ ${endDate}`;
+            document.getElementById('crm-period-label').innerText = periodLabel;
+
+            let allCredits = STATE.txs.filter(t => (t.type === 'credit' || t.type === 'receivable' || t.type === 'debt'));
+            if(catFilter !== 'all') allCredits = allCredits.filter(t => t.cat === catFilter);
+
+            let totalIssued=0, totalCollected=0, totalOutstanding=0;
+            let periodIssued=0, periodCollected=0, periodOutstanding=0;
+
+            allCredits.forEach(t => {
+                totalIssued += t.amt; if(t.isPaid) totalCollected += t.amt; else totalOutstanding += t.amt;
+            });
+
+            const listItems = allCredits.filter(t => {
+                let inRange = true;
+                if (mode === 'day') inRange = (t.date === startDate);
+                else if (mode === 'range') inRange = (t.date >= startDate && t.date <= endDate);
+                if (inRange) { periodIssued += t.amt; if(t.isPaid) periodCollected += t.amt; else periodOutstanding += t.amt; }
+                return inRange;
+            });
+
+            if(listItems.length === 0) list.innerHTML = '<div class="text-center py-10 text-gray-300 text-xs font-mono">該期間無紀錄</div>';
+            else listItems.forEach(t => {
+                const row = document.createElement('div');
+                row.className = `row-credit ${t.isPaid ? 'paid' : ''}`;
+                row.innerHTML = `<div class="flex justify-center"><input type="checkbox" class="credit-check" ${t.isPaid ? 'checked' : ''} onchange="toggleCredit('${t.id}', this)"></div><div class="num-font text-xs text-gray-500">${t.date.slice(5)}</div><div class="text-info truncate"><div class="font-bold text-xs truncate">${t.sub}</div><div class="text-[0.6rem] text-gray-400 font-mono uppercase">${t.cat}</div></div><div class="text-right num-font font-bold text-xs text-amt text-amber-600">$${t.amt.toLocaleString()}</div>`;
+                list.appendChild(row);
+            });
+
+            const fmt = new Intl.NumberFormat('en-US');
+            document.getElementById('crm-period-issued').innerText = fmt.format(periodIssued);
+            document.getElementById('crm-period-collected').innerText = fmt.format(periodCollected);
+            document.getElementById('crm-period-outstanding').innerText = fmt.format(periodOutstanding);
+            document.getElementById('crm-total-issued').innerText = fmt.format(totalIssued);
+            document.getElementById('crm-total-collected').innerText = fmt.format(totalCollected);
+            document.getElementById('crm-total-outstanding').innerText = fmt.format(totalOutstanding);
+        }
+
+        function toggleCredit(id, checkbox) {
+            const t = STATE.txs.find(x => x.id === id);
+            if(t) { t.isPaid = checkbox.checked; persist(); renderCreditManager(); }
+        }
+
+        // --- QUERY LOGIC ---
+        function toggleQueryDateInputs() {
+            const mode = document.getElementById('qry-time-mode').value;
+            const start = document.getElementById('qry-date-start');
+            const end = document.getElementById('qry-date-end');
+            const needsInputs = (mode === 'day' || mode === 'range');
+            const needsEnd = (mode === 'range');
+            if(needsInputs) document.getElementById('qry-date-inputs').classList.remove('hidden'); else document.getElementById('qry-date-inputs').classList.add('hidden');
+            start.classList.remove('hidden');
+            if(needsEnd) end.classList.remove('hidden'); else end.classList.add('hidden');
+            runQuery();
+        }
+
+        function runQuery() {
+            const tm = document.getElementById('qry-time-mode').value;
+            const kw = document.getElementById('qry-keyword').value.trim().toLowerCase();
+            const cat = document.getElementById('qry-cat').value;
+            const now = new Date(); let s, e;
+            if(tm==='month'){s=new Date(now.getFullYear(),now.getMonth(),1);e=new Date(now.getFullYear(),now.getMonth()+1,0);}
+            else if(tm==='last_month'){s=new Date(now.getFullYear(),now.getMonth()-1,1);e=new Date(now.getFullYear(),now.getMonth(),0);}
+            else if(tm==='year'){s=new Date(now.getFullYear(),0,1);e=new Date(now.getFullYear(),11,31);}
+            else if(tm==='day') { const d=document.getElementById('qry-date-start').value; if(d){s=new Date(d);e=new Date(d);} }
+            else if(tm==='range') { const d1=document.getElementById('qry-date-start').value; const d2=document.getElementById('qry-date-end').value; if(d1)s=new Date(d1); if(d2)e=new Date(d2); }
+
+            let label = ""; if(s&&e){ const fd=d=>d.toISOString().split('T')[0]; if(s.getTime()===e.getTime()) label=fd(s); else label=`${fd(s)} ~ ${fd(e)}`; } else if(tm==='all') label="ALL TIME";
+            document.getElementById('qry-period-label').innerText = label;
+
+            const res = STATE.txs.filter(t => {
+                if(cat!=='all' && t.cat!==cat) return false;
+                if(kw && !(t.sub.toLowerCase().includes(kw) || t.cat.toLowerCase().includes(kw))) return false;
+                if(tm!=='all' && s && e) { const d=new Date(t.date); if(d<s || d>e) return false; }
+                return true;
+            });
+            renderQueryResults(res);
+        }
+
+        function renderQueryResults(data) {
+            let cash=0, credit=0, cost=0, exp=0;
+            data.forEach(t => {
+                let tp = (t.type==='debt'||t.type==='receivable')?'credit':t.type;
+                if(tp==='income') cash+=t.amt; else if(tp==='credit') credit+=t.amt; else if(tp==='cost') cost+=t.amt; else if(tp==='expense') exp+=t.amt;
+            });
+            const rev = cash + credit; const gp = rev - cost; const m = rev>0?(gp/rev)*100:0;
+            const f = new Intl.NumberFormat('en-US');
+            document.getElementById('res-rev').innerText = f.format(rev);
+            document.getElementById('res-cost').innerText = f.format(cost);
+            document.getElementById('res-exp').innerText = f.format(exp);
+            document.getElementById('res-gp').innerText = f.format(gp);
+            document.getElementById('res-margin').innerText = m.toFixed(1)+'%';
+            document.getElementById('res-count').innerText = data.length;
+            const l = document.getElementById('query-list'); l.innerHTML = '';
+            if(!data.length) l.innerHTML='<div class="text-center py-10 text-gray-300 text-xs font-mono">無符合數據</div>';
+            else data.forEach(t => l.appendChild(createRow(t)));
+        }
+
+        // --- SHARED ---
+        function renderHome() { renderCats(); renderLedgerList(); renderMetrics(); updateSubSuggest(); }
+        function renderLedgerList() {
+            const list = document.getElementById('home-ledger-list'); list.innerHTML = '';
+            const data = STATE.txs.slice(0, 50);
+            if(!data.length) { list.innerHTML = '<div class="text-center py-10 text-gray-300 text-xs font-mono">暫無數據</div>'; return; }
+            data.forEach(t => list.appendChild(createRow(t)));
+        }
+        function createRow(t) {
+            const row = document.createElement('div'); row.className = 'row-item hover:bg-gray-50 transition-colors';
+            let color='text-gray-900', sign='', type=(t.type==='debt'||t.type==='receivable')?'credit':t.type;
+            if(type==='income'){color='text-emerald-700';sign='+';} else if(type==='credit'){color='text-amber-700';sign='+';} else if(type==='cost'){color='text-orange-700';sign='-';} else if(type==='expense'){color='text-rose-700';sign='-';}
+            row.innerHTML = `<div class="num-font text-xs text-gray-500 pl-1">${t.date.slice(5)}</div><div class="truncate"><div class="font-bold text-gray-900 text-xs truncate">${t.sub}</div><div class="text-[0.6rem] text-gray-400 font-mono uppercase bg-gray-100 px-1 rounded-sm inline-block mt-0.5">${t.cat}</div></div><div class="text-right num-font font-bold text-xs ${color}">${sign}${t.amt.toLocaleString()}</div><div class="text-center flex justify-center"><div onclick="promptDeleteTx('${t.id}')" class="btn-delete" role="button"><i class="fas fa-times"></i></div></div>`;
+            return row;
+        }
+        function renderQueryCats(id) { const s=document.getElementById(id); const v=s.value; s.innerHTML='<option value="all">-- 所有店鋪/分類 --</option>'; STATE.cats.forEach(c=>{const o=document.createElement('option');o.value=c;o.text=c;s.add(o)}); s.value=v; }
+        
+        function renderCats() { const s=document.getElementById('in-cat'); const v=s.value; s.innerHTML=''; STATE.cats.forEach(c=>{const o=document.createElement('option');o.value=c;o.text=c;s.add(o)}); if(STATE.cats.includes(v))s.value=v; }
+        function updateSubSuggest() { const c=document.getElementById('in-cat').value; const l=document.getElementById('sub-list'); l.innerHTML=''; const e=STATE.subs.find(x=>x.cat===c); if(e)e.items.forEach(i=>{const o=document.createElement('option');o.value=i;l.appendChild(o)}); }
+        
+        function renderCatManager() {
+            const l=document.getElementById('cat-list'); l.innerHTML=''; 
+            STATE.cats.forEach(c=>{ 
+                const d=document.createElement('div'); 
+                d.className='flex justify-between items-center text-xs bg-gray-50 px-2 py-2 border-b border-gray-100'; 
+                const s = document.createElement('span'); s.innerText = c;
+                const b = document.createElement('button');
+                b.type = 'button'; b.className = 'btn-config-del';
+                b.innerHTML = '<i class="fas fa-times"></i>';
+                b.onclick = function() { promptDelCat(c); };
+                d.appendChild(s); d.appendChild(b); l.appendChild(d); 
+            }); 
+        }
+        function sysAddCat() { const v=document.getElementById('new-cat').value.trim(); if(v&&!STATE.cats.includes(v)){ STATE.cats.push(v); persist(); renderCatManager(); document.getElementById('new-cat').value=''; } }
+        
+        function sysImport(i) { const f=i.files[0]; if(!f)return; const r=new FileReader(); r.onload=e=>{ try{ const d=JSON.parse(e.target.result); if(d.txs){ STATE=d; persist(); location.reload(); } }catch(x){ alert('INVALID'); } }; r.readAsText(f); }
+    </script>
 </body>
 </html>
-    
+
